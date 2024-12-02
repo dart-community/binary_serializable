@@ -1,3 +1,7 @@
+## 0.3.5
+
+- Add support for empty classes in the generator.
+
 ## 0.3.4
 
 - Add a fallback `getSubtype` function to `MultiBinaryType`.
