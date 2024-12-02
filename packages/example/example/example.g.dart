@@ -269,3 +269,38 @@ class _IntegerMessageConversion
     });
   }
 }
+
+class EmptyType extends BinaryType<Empty> {
+  const EmptyType();
+
+  @override
+  void encodeInto(
+    Empty input,
+    BytesBuilder builder,
+  ) {}
+  @override
+  BinaryConversion<Empty> startConversion(void Function(Empty) onValue) =>
+      _EmptyConversion(
+        this,
+        onValue,
+      );
+}
+
+class _EmptyConversion extends BinaryConversion<Empty> {
+  _EmptyConversion(
+    this.type,
+    super.onValue,
+  );
+
+  final EmptyType type;
+
+  @override
+  int add(Uint8List data) {
+    final instance = Empty();
+    onValue(instance);
+    return 0;
+  }
+
+  @override
+  void flush() {}
+}

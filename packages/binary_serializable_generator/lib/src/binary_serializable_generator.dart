@@ -57,7 +57,8 @@ class BinarySerializableGenerator
       return await BinarySerializableEmitter(buildStep).generateMultiType(node);
     }
 
-    final constructor = node.members.whereType<ConstructorDeclaration>().first;
+    final constructor =
+        node.members.whereType<ConstructorDeclaration>().firstOrNull;
 
     return await BinarySerializableEmitter(buildStep)
         .generateType(node, constructor);
@@ -190,7 +191,7 @@ class BinarySerializableEmitter {
 
   Future<String> generateType(
     ClassDeclaration clazz,
-    ConstructorDeclaration constructor,
+    ConstructorDeclaration? constructor,
   ) async {
     final element = clazz.declaredElement!;
     final fields = await getFields(clazz);
@@ -214,8 +215,10 @@ class BinarySerializableEmitter {
 
     final constructorFields = fields
         .where(
-          (f) => constructor.parameters.parameters
-              .any((p) => p.name!.lexeme == f.name),
+          (f) =>
+              constructor?.parameters.parameters
+                  .any((p) => p.name!.lexeme == f.name) ??
+              false,
         )
         .toList();
     final predeterminedFields =
@@ -227,7 +230,7 @@ class BinarySerializableEmitter {
     }
 
     code_builder.Expression constructorReference = targetType;
-    if (constructor.name case final name?) {
+    if (constructor?.name case final name?) {
       constructorReference = constructorReference.property(name.lexeme);
     }
 
@@ -243,12 +246,15 @@ class BinarySerializableEmitter {
       declareFinal(instanceVariableName)
           .assign(
             constructorReference.call(
-              constructor.parameters.parameters
-                  .where((p) => !p.isNamed)
-                  .map((p) => refer(p.name!.lexeme)),
+              constructor?.parameters.parameters
+                      .where((p) => !p.isNamed)
+                      .map((p) => refer(p.name!.lexeme)) ??
+                  [],
               Map.fromEntries(
-                constructor.parameters.parameters.where((p) => p.isNamed).map(
-                    (p) => MapEntry(p.name!.lexeme, refer(p.name!.lexeme))),
+                constructor?.parameters.parameters.where((p) => p.isNamed).map(
+                        (p) =>
+                            MapEntry(p.name!.lexeme, refer(p.name!.lexeme))) ??
+                    [],
               ),
             ),
           )
@@ -293,7 +299,9 @@ class BinarySerializableEmitter {
         ..types.replace(typeParameters)
         ..extend = TypeReference(
           (type) => type
-            ..symbol = 'CompositeBinaryConversion'
+            ..symbol = fields.isNotEmpty
+                ? 'CompositeBinaryConversion'
+                : 'BinaryConversion'
             ..types.replace([targetType]),
         )
         ..fields.replace([
@@ -322,13 +330,41 @@ class BinarySerializableEmitter {
           )
         ])
         ..methods.replace([
-          Method(
-            (builder) => builder
-              ..annotations.replace([refer('override')])
-              ..returns = refer('BinaryConversion')
-              ..name = 'startConversion'
-              ..body = startConversionBody,
-          )
+          if (fields.isNotEmpty)
+            Method(
+              (builder) => builder
+                ..annotations.replace([refer('override')])
+                ..returns = refer('BinaryConversion')
+                ..name = 'startConversion'
+                ..body = startConversionBody,
+            )
+          else ...[
+            Method(
+              (builder) => builder
+                ..annotations.replace([refer('override')])
+                ..returns = refer('int')
+                ..name = 'add'
+                ..requiredParameters.replace([
+                  Parameter(
+                    (builder) => builder
+                      ..name = 'data'
+                      ..type = refer('Uint8List'),
+                  )
+                ])
+                ..body = code_builder.Block(
+                  (builder) => builder
+                    ..statements.add(startConversionBody)
+                    ..statements.add(literal(0).returned.statement),
+                ),
+            ),
+            Method(
+              (builder) => builder
+                ..annotations.replace([refer('override')])
+                ..returns = refer('void')
+                ..name = 'flush'
+                ..body = code_builder.Block(),
+            )
+          ]
         ]),
     );
 

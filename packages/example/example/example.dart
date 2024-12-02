@@ -54,3 +54,6 @@ class IntegerMessage extends Message {
 
   IntegerMessage(this.data);
 }
+
+@BinarySerializable()
+class Empty {}
