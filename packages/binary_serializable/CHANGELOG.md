@@ -1,3 +1,7 @@
+## 0.3.6
+
+- Update metadata to point to dart-community GitHub organization.
+
 ## 0.3.5
 
 - Use `getSubtype` when decoding values.

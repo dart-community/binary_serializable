@@ -1,3 +1,7 @@
+## 0.3.6
+
+- Update metadata to point to dart-community GitHub organization.
+
 ## 0.3.5
 
 - Add support for empty classes in the generator.
