@@ -1,9 +1,9 @@
 builders:
   binary_serializable:
-    import: "package:binary_serializable_generator/builder.dart"
+    import: "package:binary_serializable_generator/binary_serializable_generator.dart"
     builder_factories: ["createBuilder"]
     # The `partId` argument to `SharedPartBuilder` is "some_cool_builder"
-    build_extensions: {".dart": [".binary_serializable.g.part"]}
+    build_extensions: { ".dart": [".binary_serializable.g.part"] }
     auto_apply: dependents
     build_to: cache
     # To copy the `.g.part` content into `.g.dart` in the source tree
