@@ -1,3 +1,7 @@
+## 0.4.0
+
+- Remove `builder` library. Now replaced with `binary_serializable_generator`.
+
 ## 0.3.6
 
 - Update metadata to point to dart-community GitHub organization.
