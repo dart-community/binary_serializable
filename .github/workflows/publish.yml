@@ -9,4 +9,8 @@ on:
 
 jobs:
   publish:
+    permissions:
+      id-token: write
+      pull-requests: write
+
     uses: dart-lang/ecosystem/.github/workflows/publish.yaml@main
