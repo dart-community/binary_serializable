@@ -1,4 +1,5 @@
 name: binary_serializable_workspace
+publish_to: none
 
 environment:
   sdk: ^3.5.0-243.0.dev
