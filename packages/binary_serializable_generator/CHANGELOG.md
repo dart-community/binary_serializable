@@ -1,3 +1,7 @@
+## 0.5.0
+
+- Support `analyzer ^7.4.5`
+
 ## 0.4.0
 
 - Remove `builder` library. Now replaced with `binary_serializable_generator`.

@@ -1,6 +1,6 @@
 name: binary_serializable_generator
 description: Code generation for binary_serializable's BinaryTypes.
-version: 0.4.0
+version: 0.5.0
 
 repository: https://github.com/dart-community/binary_serializable/tree/main/packages/binary_serializable_generator
 
@@ -11,7 +11,7 @@ resolution: workspace
 
 dependencies:
   source_gen: ^2.0.0
-  binary_serializable: ^0.3.2
+  binary_serializable: ^0.4.0
   analyzer: ^7.4.5
   build: ^2.4.1
   build_config: ^1.1.1

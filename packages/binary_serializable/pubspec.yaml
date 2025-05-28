@@ -1,6 +1,6 @@
 name: binary_serializable
 description: Efficient binary serialization and deserialization, optimized for streams of binary data.
-version: 0.3.6
+version: 0.4.0
 
 repository: https://github.com/dart-community/binary_serializable/tree/main/packages/binary_serializable
 

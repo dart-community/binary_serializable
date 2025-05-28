@@ -1,3 +1,7 @@
+## 0.4.0
+
+- Support `binary_serializable_generator ^0.5.0`
+
 ## 0.3.6
 
 - Update metadata to point to dart-community GitHub organization.
