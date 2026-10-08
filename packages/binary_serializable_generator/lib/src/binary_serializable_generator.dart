@@ -47,21 +47,17 @@ class BinarySerializableGenerator
     ConstantReader annotation,
     BuildStep buildStep,
   ) async {
-    final node = await buildStep.resolver.astNodeFor(element, resolve: true);
-
-    if (node is! ClassDeclaration) {
+    if (element is! ClassElement) {
       throw '${element.name}: @BinarySerializable() may only be applied to classes';
     }
 
-    if (node.abstractKeyword != null) {
-      return await BinarySerializableEmitter(buildStep).generateMultiType(node);
+    if (element.isAbstract) {
+      return await BinarySerializableEmitter(buildStep)
+          .generateMultiType(element);
     }
 
-    final constructor =
-        node.members.whereType<ConstructorDeclaration>().firstOrNull;
-
     return await BinarySerializableEmitter(buildStep)
-        .generateType(node, constructor);
+        .generateType(element, element.constructors.firstOrNull);
   }
 }
 
@@ -70,9 +66,7 @@ class BinarySerializableEmitter {
 
   BinarySerializableEmitter(this.buildStep);
 
-  Future<List<FieldInformation>> getFields(ClassDeclaration node) async {
-    final element = node.declaredElement!;
-
+  Future<List<FieldInformation>> getFields(InterfaceElement element) async {
     final fields = <FieldInformation>[];
 
     // Superclass fields always go first to support preludes.
@@ -88,9 +82,6 @@ class BinarySerializableEmitter {
           throw '${element.name} cannot implement more than one BinarySerializable type';
         }
 
-        final superclassNode =
-            await buildStep.resolver.astNodeFor(superclass, resolve: true);
-
         final substitutions = <String, Reference>{};
         final typeParametersInScope = <String>[];
 
@@ -98,12 +89,11 @@ class BinarySerializableEmitter {
           final parameter = superclass.typeParameters[i];
           final argument = supertype.typeArguments[i];
 
-          substitutions[parameter.name] = argument.toReference();
-          typeParametersInScope.add(parameter.name);
+          substitutions[parameter.name!] = argument.toReference();
+          typeParametersInScope.add(parameter.name!);
         }
 
-        final superclassFields =
-            await getFields(superclassNode as ClassDeclaration);
+        final superclassFields = await getFields(superclass);
 
         final substitutedSuperclassFields = superclassFields.map(
           (field) => FieldInformation(
@@ -126,30 +116,49 @@ class BinarySerializableEmitter {
     }
 
     final orderedFields = [
-      ...node.members.whereType<FieldDeclaration>(),
-      ...node.members.whereType<MethodDeclaration>().where((m) => m.isGetter),
-    ]..sort((a, b) => a.offset.compareTo(b.offset));
+      ...element.fields,
+      ...element.getters,
+    ]..sort((a, b) => a.firstFragment.offset.compareTo(b.firstFragment.offset));
 
     for (final field in orderedFields) {
-      final fieldName = field is MethodDeclaration
-          ? field.name.lexeme
-          : (field as FieldDeclaration).fields.variables.first.name.lexeme;
+      if (field.nonSynthetic != field) continue;
+
+      final fieldName = switch (field) {
+        FieldElement f => f.name!,
+        GetterElement f => f.name!,
+        _ => throw UnimplementedError('Unreachable'),
+      };
 
       Annotation? binaryTypeAnnotation;
       bool wasComputed = false;
-      for (final annotation in field.metadata) {
-        final value = annotation.elementAnnotation?.computeConstantValue();
-        final type = value?.type;
-        if (value == null || type == null) {
-          // Tentatively assume the error was due to referencing a
-          // yet-ungenerated BinaryType.
-          binaryTypeAnnotation ??= annotation;
-        } else if (binaryType.isAssignableFromType(type)) {
-          if (wasComputed) {
-            throw '${element.name}.$fieldName cannot have more than one BinaryType annotation';
-          } else {
-            wasComputed = true;
-            binaryTypeAnnotation = annotation;
+      for (final fragment in field.fragments) {
+        final node =
+            await buildStep.resolver.astNodeFor(fragment, resolve: true);
+        if (node == null) continue;
+
+        final metadata = switch (node) {
+          // Fields are declared by VariableDeclaration inside a
+          // VariableDeclarationList inside a FieldDeclaration.
+          VariableDeclaration v =>
+            (v.parent!.parent as FieldDeclaration).metadata,
+          MethodDeclaration m => m.metadata,
+          _ => [],
+        };
+
+        for (final annotation in metadata) {
+          final value = annotation.elementAnnotation?.computeConstantValue();
+          final type = value?.type;
+          if (value == null || type == null) {
+            // Tentatively assume the error was due to referencing a
+            // yet-ungenerated BinaryType.
+            binaryTypeAnnotation ??= annotation;
+          } else if (binaryType.isAssignableFromType(type)) {
+            if (wasComputed) {
+              throw '${element.name}.$fieldName cannot have more than one BinaryType annotation';
+            } else {
+              wasComputed = true;
+              binaryTypeAnnotation = annotation;
+            }
           }
         }
       }
@@ -158,31 +167,23 @@ class BinarySerializableEmitter {
         continue;
       }
 
-      final List<Declaration> subfields = field is MethodDeclaration
-          ? [field]
-          : (field as FieldDeclaration).fields.variables;
+      final existingIndex =
+          fields.indexWhere((existingField) => existingField.name == fieldName);
 
-      for (final subfield in subfields) {
-        final fieldName = subfield.declaredElement!.name!;
+      final fieldInformation = FieldInformation(
+        name: fieldName,
+        binaryType: binaryTypeAnnotation.toExpression(),
+        dartType: (field is GetterElement
+                ? field.returnType
+                : (field as FieldElement).type)
+            .toReference(),
+        isInPrelude: field is GetterElement,
+      );
 
-        final existingIndex = fields
-            .indexWhere((existingField) => existingField.name == fieldName);
-
-        final fieldInformation = FieldInformation(
-          name: fieldName,
-          binaryType: binaryTypeAnnotation.toExpression(),
-          dartType: (field is MethodDeclaration
-                  ? field.returnType!.type!
-                  : (field as FieldDeclaration).fields.type!.type!)
-              .toReference(),
-          isInPrelude: field is MethodDeclaration,
-        );
-
-        if (existingIndex != -1) {
-          fields[existingIndex] = fieldInformation;
-        } else {
-          fields.add(fieldInformation);
-        }
+      if (existingIndex != -1) {
+        fields[existingIndex] = fieldInformation;
+      } else {
+        fields.add(fieldInformation);
       }
     }
 
@@ -190,11 +191,10 @@ class BinarySerializableEmitter {
   }
 
   Future<String> generateType(
-    ClassDeclaration clazz,
-    ConstructorDeclaration? constructor,
+    InterfaceElement element,
+    ConstructorElement? constructor,
   ) async {
-    final element = clazz.declaredElement!;
-    final fields = await getFields(clazz);
+    final fields = await getFields(element);
 
     final typeParameters = element.typeParameters.map((p) => p.toReference());
     final typeArguments = element.typeParameters
@@ -216,8 +216,7 @@ class BinarySerializableEmitter {
     final constructorFields = fields
         .where(
           (f) =>
-              constructor?.parameters.parameters
-                  .any((p) => p.name!.lexeme == f.name) ??
+              constructor?.formalParameters.any((p) => p.name == f.name) ??
               false,
         )
         .toList();
@@ -230,8 +229,8 @@ class BinarySerializableEmitter {
     }
 
     code_builder.Expression constructorReference = targetType;
-    if (constructor?.name case final name?) {
-      constructorReference = constructorReference.property(name.lexeme);
+    if (constructor?.name case final name? when name != 'new') {
+      constructorReference = constructorReference.property(name);
     }
 
     final onValueReference = fields.any((f) => f.name == 'onValue')
@@ -246,14 +245,14 @@ class BinarySerializableEmitter {
       declareFinal(instanceVariableName)
           .assign(
             constructorReference.call(
-              constructor?.parameters.parameters
+              constructor?.formalParameters
                       .where((p) => !p.isNamed)
-                      .map((p) => refer(p.name!.lexeme)) ??
+                      .map((p) => refer(p.name!)) ??
                   [],
               Map.fromEntries(
-                constructor?.parameters.parameters.where((p) => p.isNamed).map(
-                        (p) =>
-                            MapEntry(p.name!.lexeme, refer(p.name!.lexeme))) ??
+                constructor?.formalParameters
+                        .where((p) => p.isNamed)
+                        .map((p) => MapEntry(p.name!, refer(p.name!))) ??
                     [],
               ),
             ),
@@ -475,18 +474,18 @@ class BinarySerializableEmitter {
 
   Future<Map<code_builder.Expression, code_builder.Expression>> getSubtypes(
     List<FieldInformation> preludeFields,
-    ClassElement clazz,
+    InterfaceElement clazz,
     LibraryElement inLibrary,
   ) async {
     final accessibleElements = [
-      ...inLibrary.topLevelElements,
-      ...inLibrary.importedLibraries
-          .expand((library) => library.exportNamespace.definedNames.values),
+      ...inLibrary.publicNamespace.definedNames2.values,
+      ...inLibrary.fragments.expand((fragment) => fragment.importedLibraries
+          .expand((library) => library.exportNamespace.definedNames2.values)),
     ];
 
     final result = <code_builder.Expression, code_builder.Expression>{};
     for (final element in accessibleElements) {
-      if (element is! ClassElement) continue;
+      if (element is! InterfaceElement) continue;
       if (binarySerializable.annotationsOf(element).isEmpty) continue;
 
       if (element.supertype != clazz.thisType &&
@@ -503,34 +502,45 @@ class BinarySerializableEmitter {
 
   Future<Map<code_builder.Expression, code_builder.Expression>> getSubtype(
     List<FieldInformation> preludeFields,
-    ClassElement clazz,
+    InterfaceElement clazz,
     LibraryElement inLibrary,
   ) async {
     if (clazz.typeParameters.isEmpty) {
       var hasCompletePrelude = true;
       final preludeExpressions = <code_builder.Expression>[];
+
+      fieldLoop:
       for (final field in preludeFields) {
         final implementation =
-            clazz.thisType.lookUpGetter2(field.name, inLibrary);
+            clazz.thisType.lookUpGetter(field.name, inLibrary);
 
         if (implementation == null ||
-            implementation.isSynthetic ||
+            implementation != implementation.nonSynthetic ||
             implementation.isAbstract) {
           hasCompletePrelude = false;
           break;
         }
 
-        final node =
-            await buildStep.resolver.astNodeFor(implementation, resolve: true);
+        code_builder.Expression? expression;
+        for (final fragment in implementation.fragments) {
+          final node =
+              await buildStep.resolver.astNodeFor(fragment, resolve: true);
 
-        if (node is! MethodDeclaration ||
-            node.body is! ExpressionFunctionBody) {
-          hasCompletePrelude = false;
+          if (node is! MethodDeclaration ||
+              node.body is! ExpressionFunctionBody) {
+            hasCompletePrelude = false;
+            break fieldLoop;
+          }
+
+          expression =
+              (node.body as ExpressionFunctionBody).expression.toExpression();
           break;
         }
 
-        final expression =
-            (node.body as ExpressionFunctionBody).expression.toExpression();
+        if (expression == null) {
+          hasCompletePrelude = false;
+          break;
+        }
 
         preludeExpressions.add(expression);
       }
@@ -544,18 +554,15 @@ class BinarySerializableEmitter {
           };
         }
 
-        return {
-          CodeExpression(Code('')).call(preludeExpressions): typeInstanciation,
-        };
+        return {literalRecord(preludeExpressions, {}): typeInstanciation};
       }
     }
 
     return await getSubtypes(preludeFields, clazz, inLibrary);
   }
 
-  Future<String> generateMultiType(ClassDeclaration clazz) async {
-    final element = clazz.declaredElement!;
-    final fields = await getFields(clazz);
+  Future<String> generateMultiType(InterfaceElement element) async {
+    final fields = await getFields(element);
 
     final preludeFields = fields.where((f) => f.isInPrelude).toList();
 
@@ -824,26 +831,27 @@ extension on DartType {
         FunctionType type => code_builder.FunctionType(
             (builder) => builder
               ..returnType = type.returnType.toReference()
-              ..types.replace(type.typeFormals.map((p) => p.toReference()))
+              ..types.replace(
+                  type.formalParameters.map((p) => p.type.toReference()))
               ..requiredParameters.replace(
-                type.parameters
+                type.formalParameters
                     .where((p) => p.isRequiredPositional)
                     .map((p) => p.type.toReference()),
               )
               ..optionalParameters.replace(
-                type.parameters
+                type.formalParameters
                     .where((p) => p.isOptionalPositional)
                     .map((p) => p.type.toReference()),
               )
               ..namedParameters.addEntries(
-                (type.parameters)
+                (type.formalParameters)
                     .where((p) => p.isOptionalNamed)
-                    .map((p) => MapEntry(p.name, p.type.toReference())),
+                    .map((p) => MapEntry(p.name!, p.type.toReference())),
               )
               ..namedRequiredParameters.addEntries(
-                (type.parameters)
+                (type.formalParameters)
                     .where((p) => p.isRequiredNamed)
-                    .map((p) => MapEntry(p.name, p.type.toReference())),
+                    .map((p) => MapEntry(p.name!, p.type.toReference())),
               )
               ..isNullable = type.nullabilitySuffix != NullabilitySuffix.none,
           ),
@@ -871,10 +879,10 @@ extension on DartType {
 extension on Expression {
   code_builder.Expression toExpression() => switch (this) {
         SimpleIdentifier node =>
-          refer(node.name, node.staticElement?.source?.uri.toString()),
+          refer(node.name, node.element?.library?.uri.toString()),
         Literal node => CodeExpression(Code(node.toSource())),
         InstanceCreationExpression node
-            when node.constructorName.staticElement?.enclosingElement3.name ==
+            when node.constructorName.element?.enclosingElement.name ==
                 'Generic' =>
           GenericExpression.forGenericName(
               (node.argumentList.arguments.first as StringLiteral)
@@ -882,25 +890,27 @@ extension on Expression {
         InstanceCreationExpression node => InvokeExpression.newOf(
             node.constructorName.toExpression(),
             node.argumentList.arguments
-                .where((e) => e is! NamedExpression)
-                .map((e) => e.toExpression())
+                .where((e) => e.correspondingParameter?.isNamed == false)
+                .map((e) => e.argumentExpression.toExpression())
                 .toList(),
             Map.fromEntries(
-              node.argumentList.arguments.whereType<NamedExpression>().map(
-                  (e) =>
-                      MapEntry(e.name.label.name, e.expression.toExpression())),
+              node.argumentList.arguments
+                  .where((e) => e.correspondingParameter?.isNamed == true)
+                  .map((e) => MapEntry(e.correspondingParameter!.name!,
+                      e.argumentExpression.toExpression())),
             ),
           ),
         InvocationExpression node => InvokeExpression.newOf(
             node.function.toExpression(),
             node.argumentList.arguments
-                .where((e) => e is! NamedExpression)
-                .map((e) => e.toExpression())
+                .where((e) => e.correspondingParameter?.isNamed == false)
+                .map((e) => e.argumentExpression.toExpression())
                 .toList(),
             Map.fromEntries(
-              node.argumentList.arguments.whereType<NamedExpression>().map(
-                  (e) =>
-                      MapEntry(e.name.label.name, e.expression.toExpression())),
+              node.argumentList.arguments
+                  .where((e) => e.correspondingParameter?.isNamed == true)
+                  .map((e) => MapEntry(e.correspondingParameter!.name!,
+                      e.argumentExpression.toExpression())),
             ),
           ),
         _ => throw 'Unable to reconstruct expression $this',
@@ -927,12 +937,14 @@ extension on Annotation {
     return InvokeExpression.newOf(
       constructor,
       arguments.arguments
-          .where((e) => e is! NamedExpression)
-          .map((e) => e.toExpression())
+          .where((e) => e.correspondingParameter?.isNamed == false)
+          .map((e) => e.argumentExpression.toExpression())
           .toList(),
       Map.fromEntries(
-        arguments.arguments.whereType<NamedExpression>().map(
-            (e) => MapEntry(e.name.label.name, e.expression.toExpression())),
+        arguments.arguments
+            .where((e) => e.correspondingParameter?.isNamed == true)
+            .map((e) => MapEntry(e.correspondingParameter!.name!,
+                e.argumentExpression.toExpression())),
       ),
     );
   }

@@ -1,3 +1,7 @@
+## 0.4.1
+
+- Update dependencies
+
 ## 0.4.0
 
 - Support `binary_serializable_generator ^0.5.0`

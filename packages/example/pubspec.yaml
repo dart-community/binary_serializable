@@ -2,16 +2,13 @@ name: example
 publish_to: none
 
 environment:
-  sdk: ^3.0.0
+  sdk: ^3.5.0
+
+resolution: workspace
 
 dependencies:
-  binary_serializable: ^0.2.0
+  binary_serializable: ^0.4.1
 
 dev_dependencies:
-  binary_serializable_generator:
-    path: ../binary_serializable_generator
-  build_runner: ^2.4.11
-
-dependency_overrides:
-  binary_serializable:
-    path: ../binary_serializable
+  binary_serializable_generator: ^0.5.1
+  build_runner: ^2.16.2

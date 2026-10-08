@@ -1,3 +1,7 @@
+## 0.5.1
+
+- Support `analyzer ^14.5.0` and `build ^4.0.11`
+
 ## 0.5.0
 
 - Support `analyzer ^7.4.5`
